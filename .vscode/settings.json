@@ -1,0 +1,17 @@
+{
+    "python.languageServer": "Pylance",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingModuleSource": "none",
+        "reportShadowedImports": "none"
+    },
+    "python.analysis.extraPaths": [
+        "/home/qtracy/.vscode/extensions/wmerkens.vscode-circuitpython-v2-0.3.2/boards/0x239A/0x802C",
+        "/home/qtracy/.vscode/extensions/wmerkens.vscode-circuitpython-v2-0.3.2/stubs",
+        "/home/qtracy/.config/Code/User/globalStorage/wmerkens.vscode-circuitpython-v2/bundle/20250518/adafruit-circuitpython-bundle-py-20250518/lib"
+    ],
+    "circuitpython.board.version": "10.0.0-alpha.6",
+    "circuitpython.board.vid": "0x239A",
+    "circuitpython.board.pid": "0x802C",
+    "python.analysis.autoImportCompletions": true,
+    
+}
