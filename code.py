@@ -4,10 +4,18 @@ import busio as bus
 import digitalio as io
 import json
 import asyncio
-import adafruit_rfm69 as rfm69 #not sensed by intellisense
+import displayio
+import terminalio
+from i2cdisplaybus import I2CDisplayBus
+import adafruit_rfm69 as rfm69
 import adafruit_nunchuk as nc
+from adafruit_display_text import label
+import adafruit_displayio_ssd1306 as ssd1306
 
 print(f"Starting code at {time.monotonic()} seconds")
+
+#release display between code boots
+displayio.release_displays()
 
 #node ids for keying messages
 robot_node_ID = 69
@@ -19,27 +27,21 @@ trans_y = 0.0
 enable = False
 vel_sp = False
 
-#used for toggles on enable and vel_sp
-last_enable = False
-
-#SPI bus stuff
-spi = bus.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
-cs = io.DigitalInOut(board.D9)
-rst = io.DigitalInOut(board.D10)
-
-#I2C bus stuff
-i2c = bus.I2C(board.SCL, board.SDA)
-nunchuck = nc.Nunchuk(i2c)
-
 #status LED for debug
 status_led = io.DigitalInOut(board.LED)
 status_led.direction = status_led.direction.OUTPUT
+
+#SPI bus
+spi = bus.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
+cs = io.DigitalInOut(board.D9)
+rst = io.DigitalInOut(board.D10)
+print(f"SPI bus boot successful at {time.monotonic()} seconds")
 
 #start radio
 try:
     radio_rfm69 = rfm69.RFM69(spi, cs, rst, 915)
     radio_rfm69.tx_power = 5
-    print(f"Radio boot successful at {time.monotonic()} seconds")
+    print(f"SPI device RFM69HCW radio present at {time.monotonic()} seconds")
 except RuntimeError as e:
     while True:
         for n in range(0, 6):
@@ -47,32 +49,54 @@ except RuntimeError as e:
             time.sleep(0.5)
         time.sleep(3)
 
-#pulse debug LED to indicate successful start
-for n in range(0, 10):
-    status_led.value = not status_led.value
-    time.sleep(0.05)
+#I2C bus
+i2c = bus.I2C(board.SCL, board.SDA, frequency=400_000)
+print(f"I2C bus boot successful at {time.monotonic()} seconds")
 
-#used to interpolate joystick in correct interval
-def interpolate(value, in_min, in_max, out_min, out_max, deadzone):
-    center = 127
-    if abs(value - center) < deadzone:
-        return 0.0
+#I2C devices
+nunchuk = nc.Nunchuk(i2c)
+print(f"I2C device nunchuk present at {time.monotonic()} seconds")
+display_bus = I2CDisplayBus(i2c, device_address=0x3D)
+display = ssd1306.SSD1306(display_bus, width=128, height=64)
+text_group = displayio.Group()
+display.root_group = text_group
+print(f"I2C device OLED present at {time.monotonic()} seconds")
+
+#display labels
+tx_text = label.Label(terminalio.FONT, text="tx: ***", x=0, y=5)
+text_group.append(tx_text)
+ty_text = label.Label(terminalio.FONT, text="ty: ***", x=0, y=15)
+text_group.append(ty_text)
+en_text = label.Label(terminalio.FONT, text="en: ***", x=0, y=25)
+text_group.append(en_text)
+sp_text = label.Label(terminalio.FONT, text="sp: ***", x=0, y=35)
+text_group.append(sp_text)
+lt_text = label.Label(terminalio.FONT, text="lt: ***", x=0, y=55)
+text_group.append(lt_text)
+
+
+#used to transform raw joystick to [-1, 1] interval
+def normalize(value):
+    normalized_value = round((value / 128) - 1, 2)
+    if abs(normalized_value) > 0.05:
+        return normalized_value
     else:
-        return round(out_min + (value - in_min) * (out_max - out_min) / (in_max - in_min), 2)
-    
+        return 0.0
+
 #used to update io data
 async def run_io():
 
     #globals
-    global trans_x, trans_y, enable, vel_sp, last_enable, last_vel_sp
+    global trans_x, trans_y, enable, vel_sp, last_enable, last_enable_time
+
+    #update data
+    trans_x = normalize(nunchuk.joystick.x)
+    trans_y = normalize(nunchuk.joystick.y)
+    enable = nunchuk.buttons.Z
+    vel_sp = nunchuk.buttons.C
     
-    #check button and joystick states
-    trans_x = interpolate(nunchuck.joystick.x, 0, 255, -1, 1, 0.05)
-    trans_y = interpolate(nunchuck.joystick.y, 0, 255, -1, 1, 0.05)
-    if nunchuck.buttons.C and not last_enable:
-        enable = not enable
-    last_enable = nunchuck.buttons.C
-    vel_sp = nunchuck.buttons.Z
+    #break
+    await asyncio.sleep(0)
 
 #use to transmit data
 async def transmit():
@@ -101,29 +125,51 @@ async def blink():
 
     #blink
     status_led.value = True
-    time.sleep(0.025)
+    time.sleep(0.01)
     status_led.value = False
-    
+
     #break
+    await asyncio.sleep(0)
+
+#update that shizzle yo
+async def oled_update():
+    tx_text.text = f"tx: {trans_x}"
+    ty_text.text = f"ty: {trans_y}"
+
+    if enable: en_text.text = f"en: ENABLE"
+    else: en_text.text = f"en: DISABLE"
+    if vel_sp: sp_text.text = f"sp: FAST"
+    else: sp_text.text = f"sp: SLOW"
+
     await asyncio.sleep(0)
 
 #do i really need to explain?
 async def main():
+    print(f"Main loop start at {time.monotonic()} seconds")
     blink_time_last = time.monotonic()
+    oled_time_last = time.monotonic()
+    main_loop_time_last = time.monotonic()
     while True:
 
         #clear task list, check time
         tasks = []
         time_now = time.monotonic()
 
-        #always add transmit and io checks to schedule
-        tasks.append(run_io())
-        tasks.append(transmit())
-
         #only run 1 time per second
         if time_now - blink_time_last >= 1:
             blink_time_last = time.monotonic()
             tasks.append(blink())
+
+        #schedule most tasks on 100ms interval to speed up loop time
+        if time_now - oled_time_last >= 0.1:
+            oled_time_last = time.monotonic()
+            tasks.append(run_io())
+            tasks.append(oled_update())
+            tasks.append(transmit())
+            lt_text.text = f"lt: {round(time_now - main_loop_time_last, 4)}"
+        
+        #reset loop time timer
+        main_loop_time_last = time.monotonic()
 
         #gather tasks and run
         await asyncio.gather(*tasks)

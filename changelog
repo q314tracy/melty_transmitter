@@ -6,3 +6,9 @@
     Trying to avoid slicing to eliminate sensitivity to packet loss.
     Heartbeat packet system still needing to be built to kick watchdog on robot.
     Possibly condsidering adding LCD/OLED terminal display or serial link to logger for better debug. (Sparkfun OpenLog?)
+
+5.30.25
+    OLED display for telemetry added. 
+    Loop time optimization, moved most functions to 10hz.
+    Further loop time optimization needed, multiple loops needed to order operations optimally.
+    Moving onto building receiver/robot side, will update when roughed in.
