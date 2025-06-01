@@ -27,6 +27,11 @@ trans_y = 0.0
 enable = False
 vel_sp = False
 
+#vars for telemetry from robot
+bat_volts = 0.0
+angular_vel = 0.0
+angular_dir = 0.0
+
 #status LED for debug
 status_led = io.DigitalInOut(board.LED)
 status_led.direction = status_led.direction.OUTPUT
@@ -41,6 +46,7 @@ print(f"SPI bus boot successful at {time.monotonic()} seconds")
 try:
     radio_rfm69 = rfm69.RFM69(spi, cs, rst, 915)
     radio_rfm69.tx_power = 5
+    #radio_rfm69.timeout = 0.050
     print(f"SPI device RFM69HCW radio present at {time.monotonic()} seconds")
 except RuntimeError as e:
     while True:
@@ -73,7 +79,12 @@ sp_text = label.Label(terminalio.FONT, text="sp: ***", x=0, y=35)
 text_group.append(sp_text)
 lt_text = label.Label(terminalio.FONT, text="lt: ***", x=0, y=55)
 text_group.append(lt_text)
-
+av_text = label.Label(terminalio.FONT, text="av: ***", x=64, y=5)
+text_group.append(av_text)
+ad_text = label.Label(terminalio.FONT, text="ad: ***", x=64, y=15)
+text_group.append(ad_text)
+bv_text = label.Label(terminalio.FONT, text="bv: ***", x=64, y=25)
+text_group.append(bv_text)
 
 #used to transform raw joystick to [-1, 1] interval
 def normalize(value):
@@ -87,7 +98,7 @@ def normalize(value):
 async def run_io():
 
     #globals
-    global trans_x, trans_y, enable, vel_sp, last_enable, last_enable_time
+    global trans_x, trans_y, enable, vel_sp
 
     #update data
     trans_x = normalize(nunchuk.joystick.x)
@@ -97,6 +108,28 @@ async def run_io():
     
     #break
     await asyncio.sleep(0)
+
+#use to receive data
+async def receive():
+
+    #globals
+    global trans_x, trans_y, enable, vel_sp, angular_vel, bat_volts, angular_dir
+
+    #receive packet, check node id, write data if good
+    packet = radio_rfm69.receive()
+    if packet is not None:
+        data = json.loads(packet.decode("utf-8"))
+        if data["id"] == robot_node_ID:
+            angular_vel = data["av"]
+            angular_dir = data["ad"]
+            bat_volts = data["bv"]
+    else:
+        #print("no packet")
+        pass
+
+    #break
+    await asyncio.sleep(0)
+
 
 #use to transmit data
 async def transmit():
@@ -135,9 +168,12 @@ async def blink():
 async def oled_update():
     tx_text.text = f"tx: {trans_x}"
     ty_text.text = f"ty: {trans_y}"
+    av_text.text = f"av: {angular_vel}"
+    ad_text.text = f"ad: {angular_dir}"
+    bv_text.text = f"bv: {bat_volts}"
 
-    if enable: en_text.text = f"en: ENABLE"
-    else: en_text.text = f"en: DISABLE"
+    if enable: en_text.text = f"en: YES"
+    else: en_text.text = f"en: NO"
     if vel_sp: sp_text.text = f"sp: FAST"
     else: sp_text.text = f"sp: SLOW"
 
@@ -165,9 +201,11 @@ async def main():
             oled_time_last = time.monotonic()
             tasks.append(run_io())
             tasks.append(oled_update())
-            tasks.append(transmit())
-            lt_text.text = f"lt: {round(time_now - main_loop_time_last, 4)}"
+            #tasks.append(transmit())
+            lt_text.text = f"lt: {round(time_now - main_loop_time_last, 5)}"
         
+        
+        tasks.append(receive())
         #reset loop time timer
         main_loop_time_last = time.monotonic()
 
